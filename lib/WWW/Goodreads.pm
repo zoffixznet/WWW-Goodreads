@@ -7,6 +7,7 @@ use warnings;
 
 use Moo;
 use LWP::UserAgent;
+use OAuth::Lite::Consumer;
 
 has key    => ( is => 'ro', required => 1 );
 has secret => ( is => 'ro', required => 1 );
@@ -18,6 +19,24 @@ has _ua    => ( is => 'ro', build_arg => undef, default => sub {
                     . 'Gecko/20100101 Firefox/26.0'
     );
 });
+
+sub oauth {
+    my $self = shift;
+
+    my $consumer = OAuth::Lite::Consumer->new(
+        consumer_key       => $self->key,
+        consumer_secret    => $self->secret,
+        site               => q{http://www.goodreads.com},
+        request_token_path => q{/request_token},
+        access_token_path  => q{/access_token},
+        authorize_path     => q{http://example.org/authorize},
+    );
+
+    my $request_token = $consumer->get_request_token(
+        callback_url => q{http://yourservice/callback},
+    );
+    print $request_token;
+}
 
 #### API METHODS
 
