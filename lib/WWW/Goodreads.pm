@@ -1,5 +1,6 @@
 package WWW::Goodreads;
 
+use 5.010;
 use strict;
 use warnings;
 
@@ -7,10 +8,17 @@ use warnings;
 
 use Moo;
 use LWP::UserAgent;
-use OAuth::Lite::Consumer;
+use Net::OAuth::Simple;
+
+our $AUTHORIZATION_URL = 'https://www.goodreads.com/oauth/authorize';
+our $ACCESS_TOKEN_URL  = 'https://www.goodreads.com/oauth/access_token';
+our $REQUEST_TOKEN_URL = 'https://www.goodreads.com/oauth/request_token';
 
 has key    => ( is => 'ro', required => 1 );
 has secret => ( is => 'ro', required => 1 );
+has access_token        => ( is => 'rw', );
+has access_token_secret => ( is => 'rw', );
+has _auth   => ( is => 'rw', build_arg => undef, );
 
 has error => ( is => 'rw', build_arg => undef );
 has _ua    => ( is => 'ro', build_arg => undef, default => sub {
@@ -20,22 +28,53 @@ has _ua    => ( is => 'ro', build_arg => undef, default => sub {
     );
 });
 
-sub oauth {
+sub auth {
     my $self = shift;
 
-    my $consumer = OAuth::Lite::Consumer->new(
+    my %tokens = (
         consumer_key       => $self->key,
         consumer_secret    => $self->secret,
-        site               => q{http://www.goodreads.com},
-        request_token_path => q{/request_token},
-        access_token_path  => q{/access_token},
-        authorize_path     => q{http://example.org/authorize},
+        access_token       => $self->access_token,
+        access_secret      => $self->access_token_secret,
     );
 
-    my $request_token = $consumer->get_request_token(
-        callback_url => q{http://yourservice/callback},
+    my $auth = Net::OAuth::Simple->new(
+        tokens => \%tokens,
+        return_undef_on_error => 1,
+        urls   => {
+            authorization_url => $AUTHORIZATION_URL,
+            request_token_url => $REQUEST_TOKEN_URL,
+            access_token_url  => $ACCESS_TOKEN_URL,
+        },
     );
-    print $request_token;
+
+    $auth->get_authorization_url( callback => 'oob' ) ."\n";
+
+    unless ( $auth->authorized ) {
+        print "STEP 1: REQUEST GOODREADS AUTHORIZATION FOR THIS APP\n";
+        print "\tURL : ".
+            $auth->get_authorization_url( callback => 'oob' ) ."\n";
+        print "\n-- Please go to the above URL and authorize the app";
+        print "\n-- It will give you a code. Please type it here: ";
+        my $verifier = <STDIN>; print "\n";
+        chomp($verifier);
+        $auth->verifier($verifier);
+
+        my ( $access_token, $access_token_secret )
+        = $auth->request_access_token;
+        $self->access_token( $access_token );
+        $self->access_token_secret( $access_token_secret );
+
+        print "You have now authorized this app.\n";
+        print "Your access token and secret are:\n\n";
+        print "access_token=$access_token\n";
+        print "access_token_secret=$access_token_secret\n";
+        print "\n";
+    }
+
+    $self->_auth( $auth );
+
+    return;
 }
 
 #### API METHODS
