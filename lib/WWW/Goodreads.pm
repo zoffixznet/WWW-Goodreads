@@ -35,9 +35,8 @@ sub auth {
         consumer_key       => $self->key,
         consumer_secret    => $self->secret,
         access_token       => $self->access_token,
-        access_secret      => $self->access_token_secret,
+        access_token_secret      => $self->access_token_secret,
     );
-
     my $auth = Net::OAuth::Simple->new(
         tokens => \%tokens,
         return_undef_on_error => 1,
@@ -47,8 +46,6 @@ sub auth {
             access_token_url  => $ACCESS_TOKEN_URL,
         },
     );
-
-    $auth->get_authorization_url( callback => 'oob' ) ."\n";
 
     unless ( $auth->authorized ) {
         print "STEP 1: REQUEST GOODREADS AUTHORIZATION FOR THIS APP\n";
@@ -79,7 +76,14 @@ sub auth {
 
 #### API METHODS
 
-sub auth_user { ... }
+sub auth_user {
+    my $self = shift;
+
+    return $self->_auth->make_restricted_request(
+        'https://www.goodreads.com/api/auth_user',
+        'GET',
+    );
+}
 sub author_books { ... }
 sub author_show { ... }
 sub book_isbn_to_id { ... }
