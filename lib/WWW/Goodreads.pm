@@ -9,6 +9,7 @@ use warnings;
 use Moo;
 use LWP::UserAgent;
 use Net::OAuth::Simple;
+use XML::Simple; # wat?
 
 our $AUTHORIZATION_URL = 'https://www.goodreads.com/oauth/authorize';
 our $ACCESS_TOKEN_URL  = 'https://www.goodreads.com/oauth/access_token';
@@ -74,16 +75,32 @@ sub auth {
     return;
 }
 
+sub _set_error {
+    my ( $self, $error ) = @_;
+    $self->error( $error );
+    return;
+}
+
+sub _make_request {
+    my ( $self, $url, $type ) = @_;
+    $type ||= 'GET';
+    my $res = $self->_auth->make_restricted_request( $url, $type );
+    $res->is_success or return $self->_set_error( $res->status_line );
+
+    my $data = XMLin($res->decoded_content);
+    return $data;
+}
+
 #### API METHODS
 
 sub auth_user {
     my $self = shift;
+    my $data
+    = $self->_make_request('https://www.goodreads.com/api/auth_user');
 
-    return $self->_auth->make_restricted_request(
-        'https://www.goodreads.com/api/auth_user',
-        'GET',
-    );
+    return delete $data->{user};
 }
+
 sub author_books { ... }
 sub author_show { ... }
 sub book_isbn_to_id { ... }
@@ -171,6 +188,30 @@ __END__
 WWW::Goodreads - www.goodreads.com API implementation
 
 =head1 SYNOPSIS
+
+=head1 API METHODS
+
+=head2 C<auth_user>
+
+    my $user = $gr->auth_user
+        or die "Error: " . $gr->error;
+
+    print "User name: $user->{name}\n";
+    print "User ID: $user->{id}\n";
+    print "Link to user's profile: $user->{link}\n";
+
+    ## Prints
+    # User name: Perl Module
+    # User ID: 28080395
+    # Link to user's profile: https://www.goodreads.com/user/show/28080395-perl-module?utm_medium=api
+
+B<Takes> no arguments. Fetches information on the currently authorized
+user. B<On failure> return either C<undef> or an empty
+list, depending on the context, and the reason for failure will
+be available via C<< ->error >> method. B<On success> returns
+a hashref with three keys C<name>, C<id>, and C<link>, which are
+user's full name, user's ID, and the link to the user's
+profile respectively.
 
 =head1 REPOSITORY
 
