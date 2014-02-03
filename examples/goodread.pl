@@ -17,10 +17,6 @@ my $gr = WWW::Goodreads->new(
     access_token_secret => 'Er4wCvp6fLIzTXWDz6CiPfTiSyNWnMxxnWnDqBiT1M',
 );
 
-$gr->auth;
-my $user = $gr->auth_user
-        or die "Error: " . $gr->error;
-
-    print "User name: $user->{name}\n";
-    print "User ID: $user->{id}\n";
-    print "Link to user's profile: $user->{link}\n";
+# $gr->auth;
+my $books = $gr->author_books( id => 42 )
+    or die "Error: " . $gr->error;

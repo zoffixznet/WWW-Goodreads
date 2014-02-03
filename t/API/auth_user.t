@@ -10,7 +10,7 @@ use lib qw{t}; use WWWGoodReadsTester qw/startup_gr/;
 my $gr = startup_gr();
 
 is_deeply(
-    $gr->auth_user,
+    $gr->auth_user, ### REWRITE THIS TO CHECK FOR NETWORK ERRORS!!
     {
         'link' => 'https://www.goodreads.com/user/show/28080395-perl-module?utm_medium=api',
         'name' => 'Perl Module',

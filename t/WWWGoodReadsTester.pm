@@ -10,6 +10,8 @@ our @ISA = qw(Exporter);
 our @EXPORT_OK = qw(startup_gr);
 
 sub startup_gr {
+    my %args = @_;
+
     my $keys_data;
     if ( -e 'WWW-Goodreads-KEYS' ) {
         $ENV{AUTOMATED_TESTING} and diag "Reading WWW-Goodreads-KEYS";
@@ -44,7 +46,7 @@ sub startup_gr {
         access_token_secret => $access_secret,
     );
 
-    $gr->auth;
+    $gr->auth unless $args{no_oauth};
 
     return $gr;
 }

@@ -9,6 +9,8 @@ use warnings;
 use Moo;
 use LWP::UserAgent;
 use Net::OAuth::Simple;
+use URI;
+use Carp qw/croak/;
 use XML::Simple; # wat?
 
 our $AUTHORIZATION_URL = 'https://www.goodreads.com/oauth/authorize';
@@ -17,6 +19,9 @@ our $REQUEST_TOKEN_URL = 'https://www.goodreads.com/oauth/request_token';
 
 has key    => ( is => 'ro', required => 1 );
 has secret => ( is => 'ro', required => 1 );
+has be_nice => ( is => 'rw', default => 1 ); # Whether we should stick to
+                                    # the at most 1-request-per-second
+                                    # rule of API terms
 has access_token        => ( is => 'rw', );
 has access_token_secret => ( is => 'rw', );
 has _auth   => ( is => 'rw', build_arg => undef, );
@@ -81,27 +86,110 @@ sub _set_error {
     return;
 }
 
-sub _make_request {
+sub _make_oauth_request {
     my ( $self, $url, $type ) = @_;
     $type ||= 'GET';
+    $self->_auth and $self->_auth->authorized
+        or croak q{We don't seem to be authorized to use OAuth API calls.}
+            . ' Did you forget to call ->auth() first?';
+
     my $res = $self->_auth->make_restricted_request( $url, $type );
     $res->is_success or return $self->_set_error( $res->status_line );
 
-    my $data = XMLin($res->decoded_content);
-    return $data;
+    return XMLin($res->decoded_content);
 }
+
+sub _make_key_request {
+    my ( $self, $url, $type, %args ) = @_;
+    $type ||= 'GET';
+
+    if ( $type eq 'GET' ) {
+        my $url = URI->new( $url );
+        $url->query_form( key => $self->key, %args );
+        my $res = $self->_ua->get($url);
+        $res->is_success or return $self->_set_error( $res->status_line );
+        return $res->decoded_content;
+    }
+
+    ...
+}
+
+####
+#### Methods to fix up some of the values XML::Simple gives us
+#### Moving these to separate methods, because we probably should
+#### Use a different XML parser to make things cleaner
+####
+
+sub __xml_simple_decontentify {
+    $_ = $_->{content}
+        for @_;
+}
+
+sub __xml_simple_make_true_undef {
+    for ( values %{ $_[0] } ) {
+        ref eq 'HASH'
+            and (
+                not keys %$_
+                or ( keys %$_ == 1 and $_->{nil} eq 'true' )
+            )
+            and undef $_;
+    }
+}
+
+# We have cases where we can't use this natively with XML::Simple
+sub __xml_simple_forcearray {
+    ref eq 'HASH' and $_ = [ $_ ]
+        for @_;
+}
+
 
 #### API METHODS
 
 sub auth_user {
     my $self = shift;
     my $data
-    = $self->_make_request('https://www.goodreads.com/api/auth_user');
+    = $self->_make_oauth_request('https://www.goodreads.com/api/auth_user');
 
     return delete $data->{user};
 }
 
-sub author_books { ... }
+sub author_books {
+    my ( $self, %args ) = @_;
+    $args{id}
+        or croak 'You MUST specify Goodreads Author id number using the'
+            . ' `id` argument; e.g. ->author_books( id => 42 )';
+
+    $args{page} ||= 1; $args{page} += 0; $args{page} =~ /\D/
+        and croak 'Argument `page` takes positive integers only';
+
+    $args{get_all} = 0; #### TODO: implement a method to obtain ALL books
+                        #### In the list
+
+    my $data = $self->_make_key_request(
+        'https://www.goodreads.com/author/list/' . $args{id} . '.xml',
+    );
+
+    $data = XMLin( $data,
+        GroupTags => { authors => 'author' }
+    );
+
+    # Shuffle the data to where it makes more sense
+    $data = delete $data->{author};
+    $data->{ "book_$_" } = delete $data->{books}{ $_ }
+        for qw/end  start  total/;
+    $data->{books} = delete $data->{books}{book};
+
+    # This is really sort of a hack to fix what XML::Simple gave us;
+    # Would this be cleaner if we used a different parser?
+    for my $book ( @{ $data->{books} } ) {
+        __xml_simple_forcearray( $book->{authors} );
+        __xml_simple_decontentify( @$book{qw/text_reviews_count  id/} );
+        __xml_simple_make_true_undef( $book );
+    }
+
+    return $data;
+}
+
 sub author_show { ... }
 sub book_isbn_to_id { ... }
 sub book_review_counts { ... }
@@ -212,6 +300,93 @@ be available via C<< ->error >> method. B<On success> returns
 a hashref with three keys C<name>, C<id>, and C<link>, which are
 user's full name, user's ID, and the link to the user's
 profile respectively.
+
+=head2 C<author_books>
+
+    my $books = $gr->author_books( id => 42 )
+        or die "Error: " . $gr->error;
+
+    my $books = $gr->author_books( id => 42, page => 2 )
+        or die "Error: " . $gr->error;
+
+B<Returns> a paginated list of specified author's books.
+B<Takes> arguments C<id> and C<page> as key/value pairs.
+Argument C<id> is B<mandatory>, and specifies the C<Author ID> of the
+author whose books we want to retrieve. Argument C<page>
+is B<optional> (B<default> is C<1>) and specifies the page number of
+the book list to return. The list seems to be returned in chunks of
+24 books; you can check whether you retrieved the last page of the
+list by comparing C<book_end> and C<book_total> arguments in the return.
+B<On failure> return either C<undef> or an empty
+list, depending on the context, and the reason for failure will
+be available via C<< ->error >> method. B<On success> returns
+a hashref, a sample of which is shown below.
+
+=over 4
+
+=item * Key C<link> contains the link to the author's GoodReads page
+
+=item * Key C<name> contains author's name
+
+=item * Key C<id> contains author's ID
+
+=item * Key C<book_start> contains the book number of the first book
+        on this page we retrieved
+
+=item * Key C<book_end> contains the book number of the last book
+        on this page we retrieved
+
+=item * Key C<book_total> contains the total number of books in the list.
+
+=item * Key C<books> contains an arrayref of hashrefs, where each
+hashref is the author's book. See the data dump below for the structure
+of book hashrefs
+
+=back
+
+    {
+        'link' => 'https://www.goodreads.com/author/show/42.Wendy_Wasserstein',
+        'book_end' => '24',
+        'book_start' => '1',
+        'name' => 'Wendy Wasserstein',
+        'id' => '42',
+        'book_total' => '24',
+        'books' => [
+            {
+                'image_url' => 'https://www.goodreads.com/assets/nocover/111x148.png',
+                'publication_day' => undef,
+                'small_image_url' => 'https://www.goodreads.com/assets/nocover/60x80.png',
+                'num_pages' => undef,
+                'edition_information' => undef,
+                'isbn13' => '9781400042319',
+                'ratings_count' => '1067',
+                'isbn' => '1400042313',
+                'id' => '19826',
+                'publisher' => undef,
+                'link' => 'https://www.goodreads.com/book/show/19826.Elements_of_Style',
+                'authors' => [
+                     {
+                       'link' => 'https://www.goodreads.com/author/show/42.Wendy_Wasserstein',
+                       'name' => 'Wendy Wasserstein',
+                       'small_image_url' => 'https://d202m5krfqbpi5.cloudfront.net/authors/1207026232p2/42.jpg',
+                       'text_reviews_count' => '469',
+                       'ratings_count' => '4553',
+                       'image_url' => 'https://d202m5krfqbpi5.cloudfront.net/authors/1207026232p5/42.jpg',
+                       'id' => '42',
+                       'average_rating' => '3.56'
+                     }
+                ],
+                'description' => undef,
+                'publication_month' => undef,
+                'published' => undef,
+                'format' => undef,
+                'text_reviews_count' => '161',
+                'publication_year' => undef,
+                'title' => 'Elements of Style',
+                'average_rating' => '2.99'
+            }
+        ],
+    }
 
 =head1 REPOSITORY
 
