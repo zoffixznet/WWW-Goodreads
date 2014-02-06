@@ -11,7 +11,7 @@ use lib qw{t}; use WWWGoodReadsTester qw/startup_gr/;
 my $gr = startup_gr( no_oauth => 1 );
 
 cmp_deeply(
-    $gr->author_show( id => 42 ),
+    $gr->author_show( 42 ),
     {
         'link' => 'https://www.goodreads.com/author/show/42.Wendy_Wasserstein',
         'name' => 'Wendy Wasserstein',

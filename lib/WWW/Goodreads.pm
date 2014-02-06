@@ -10,6 +10,7 @@ use LWP::UserAgent;
 use Net::OAuth::Simple;
 use URI;
 use Carp qw/croak/;
+use Business::ISBN;
 use XML::Simple; # wat?
 
 our $AUTHORIZATION_URL = 'https://www.goodreads.com/oauth/authorize';
@@ -93,7 +94,9 @@ sub _make_oauth_request {
             . ' Did you forget to call ->auth() first?';
 
     my $res = $self->_auth->make_restricted_request( $url, $type );
-    $res->is_success or return $self->_set_error( $res->status_line );
+    $res->is_success or return $self->_set_error(
+        'Network error: ' . $res->status_line
+    );
 
     return XMLin($res->decoded_content);
 }
@@ -106,7 +109,9 @@ sub _make_key_request {
         my $url = URI->new( $url );
         $url->query_form( key => $self->key, %args );
         my $res = $self->_ua->get($url);
-        $res->is_success or return $self->_set_error( $res->status_line );
+        $res->is_success or return $self->_set_error(
+            'Network error: ' . $res->status_line
+        );
         return $res->decoded_content;
     }
 
@@ -153,19 +158,15 @@ sub auth_user {
 }
 
 sub author_books {
-    my ( $self, %args ) = @_;
-    $args{id}
-        or croak 'You MUST specify Goodreads Author id number using the'
-            . ' `id` argument; e.g. ->author_books( id => 42 )';
+    my ( $self, $id, $page ) = @_;
+    $id or croak 'You MUST specify Goodreads Author id number '
+        . 'using the argument';
 
-    $args{page} ||= 1; $args{page} += 0; $args{page} =~ /\D/
+    $page ||= 1; $page += 0; $page =~ /\D/
         and croak 'Argument `page` takes positive integers only';
 
-    $args{get_all} = 0; #### TODO: implement a method to obtain ALL books
-                        #### In the list
-
     my $data = $self->_make_key_request(
-        'https://www.goodreads.com/author/list/' . $args{id} . '.xml',
+        'https://www.goodreads.com/author/list/' . $id . '.xml',
     );
 
     $data = XMLin( $data,
@@ -190,13 +191,12 @@ sub author_books {
 }
 
 sub author_show {
-    my ( $self, %args ) = @_;
-    $args{id}
-        or croak 'You MUST specify Goodreads Author id number using the'
-            . ' `id` argument; e.g. ->author_show( id => 42 )';
+    my ( $self, $id ) = @_;
+    $id
+     or croak 'You MUST specify Goodreads Author id number as the argument';
 
     my $data = $self->_make_key_request(
-        'https://www.goodreads.com/author/show/' . $args{id} . '.xml',
+        'https://www.goodreads.com/author/show/' . $id . '.xml',
     );
 
     $data = XMLin( $data,
@@ -220,7 +220,19 @@ sub author_show {
     return $data;
 }
 
-sub book_isbn_to_id { ... }
+sub book_isbn_to_id {
+    my ( $self, $isbn ) = @_;
+
+    $isbn or croak 'You MUST specify a book ISBN number as the argument';
+
+    $isbn = Business::ISBN->new( $isbn )
+        unless ref $isbn;
+
+    return $self->_make_key_request(
+        'https://www.goodreads.com/book/isbn_to_id/' . $isbn->as_string([])
+    );
+}
+
 sub book_review_counts { ... }
 sub book_show { ... }
 sub book_show_by_isbn { ... }
@@ -306,35 +318,9 @@ WWW::Goodreads - www.goodreads.com API implementation
 
 =head1 SYNOPSIS
 
-=for html
-
-=head1 ICON LEGEND
-
-=for html This documentation contains icons that allow easy recognition of
-what arguments and returned values are valid with the method. Possible icons
-you might see:
-
-=over 4
-
-=item
-
-=for html <img src="https://github.com/zoffixznet/Pod-Spiffy/raw/master/PODIcons/args-none.png" alt="Takes no arguments"> the method takes no arguments
-
-=item
-
-=for html <img src="https://raw2.github.com/zoffixznet/Pod-Spiffy/e81e2b5ebc103c052191bffe0af363a659b5e406/PODIcons/undef-or-empty-list.png" alt="On failure, returns either undef or an empty list"> on failure, the method returns either <code>undef</code> or an empty list, depending on the context
-
-=item
-
-=for html <img src="https://github.com/zoffixznet/Pod-Spiffy/raw/master/PODIcons/return-hashref.png" alt="On success, returns a hashref"> the method returns a hashref on success
-
-=back
-
 =head1 API METHODS
 
 =head2 C<auth_user>
-
-=for html <img src="https://github.com/zoffixznet/Pod-Spiffy/raw/master/PODIcons/args-none.png" alt="Takes no arguments"> <img src="https://github.com/zoffixznet/Pod-Spiffy/raw/master/PODIcons/return-hashref.png" alt="On success, returns a hashref"> <img src="https://raw2.github.com/zoffixznet/Pod-Spiffy/e81e2b5ebc103c052191bffe0af363a659b5e406/PODIcons/undef-or-empty-list.png" alt="On failure, returns either undef or an empty list">
 
     my $user = $gr->auth_user
         or die "Error: " . $gr->error;
@@ -350,7 +336,7 @@ you might see:
 
 I<Get id of user who authorized OAuth.>
 B<Takes> no arguments. Fetches information on the currently authorized
-user. B<On failure> return either C<undef> or an empty
+user. B<On failure> returns either C<undef> or an empty
 list, depending on the context, and the reason for failure will
 be available via C<< ->error >> method. B<On success> returns
 a hashref with three keys C<name>, C<id>, and C<link>, which are
@@ -359,24 +345,22 @@ profile respectively.
 
 =head2 C<author_books>
 
-=for html <img src="https://github.com/zoffixznet/Pod-Spiffy/raw/master/PODIcons/args-none.png" alt="Takes no arguments"> <img src="https://github.com/zoffixznet/Pod-Spiffy/raw/master/PODIcons/return-hashref.png" alt="On success, returns a hashref"> <img src="https://raw2.github.com/zoffixznet/Pod-Spiffy/e81e2b5ebc103c052191bffe0af363a659b5e406/PODIcons/undef-or-empty-list.png" alt="On failure, returns either undef or an empty list">
-
-    my $books = $gr->author_books( id => 42 )
+    my $books = $gr->author_books( 42 )
         or die "Error: " . $gr->error;
 
-    my $books = $gr->author_books( id => 42, page => 2 )
+    my $books = $gr->author_books( 42, 2 )
         or die "Error: " . $gr->error;
 
 I<Paginate an author's books.>
 B<Returns> a paginated list of specified author's books.
-B<Takes> arguments C<id> and C<page> as key/value pairs.
-Argument C<id> is B<mandatory>, and specifies the C<Author ID> of the
-author whose books we want to retrieve. Argument C<page>
+B<Takes> two arguments. The first argument is B<mandatory>, and
+specifies the C<Author ID> of the
+author whose books we want to retrieve. The second argument
 is B<optional> (B<default> is C<1>) and specifies the page number of
 the book list to return. The list seems to be returned in chunks of
 24 books; you can check whether you retrieved the last page of the
 list by comparing C<book_end> and C<book_total> arguments in the return.
-B<On failure> return either C<undef> or an empty
+B<On failure> returns either C<undef> or an empty
 list, depending on the context, and the reason for failure will
 be available via C<< ->error >> method. B<On success> returns
 a hashref, a sample of which is shown below.
@@ -451,15 +435,13 @@ Sample:
 
 =head2 C<author_show>
 
-=for html <img src="https://github.com/zoffixznet/Pod-Spiffy/raw/master/PODIcons/args-none.png" alt="Takes no arguments"> <img src="https://github.com/zoffixznet/Pod-Spiffy/raw/master/PODIcons/return-hashref.png" alt="On success, returns a hashref"> <img src="https://raw2.github.com/zoffixznet/Pod-Spiffy/e81e2b5ebc103c052191bffe0af363a659b5e406/PODIcons/undef-or-empty-list.png" alt="On failure, returns either undef or an empty list">
-
-    my $info = $gr->author_show( id => 42 )
+    my $info = $gr->author_show( 42 )
         or die "Error: " . $gr->error;
 
 I<Get info about an author by id.>
-B<Takes> arguments as key/value pairs. Argument C<id> is B<mandatory>
-and specifies GoodReads Author ID number, for the author whose information
-you want to view. B<On failure> return either C<undef> or an empty
+B<Takes> one B<mandatory> argument
+that specifies GoodReads Author ID number, for the author whose information
+you want to view. B<On failure> returns either C<undef> or an empty
 list, depending on the context, and the reason for failure will
 be available via C<< ->error >> method. B<On success> returns
 a hashref, a sample of which is shown below.
@@ -514,6 +496,28 @@ a hashref, a sample of which is shown below.
              },
         ],
     }
+
+=head2 C<book_isbn_to_id>
+
+    my $id = $gr->book_isbn_to_id('9780679734994')
+        or die "Error: " . $gr->error;
+
+
+    my $isbn = Business::ISBN->new('978-0-679-73499-4');
+    my $id = $gr->book_isbn_to_id( $isbn )
+        or die "Error: " . $gr->error;
+
+I<Get the Goodreads book ID given an ISBN. Response
+contains the ID without any markup.>
+B<Takes> one B<mandatory> argument that is the ISBN of the book whose ID
+you want to obtain. The ISBN can be either given as a string or
+as a L<Business::ISBN> object.
+
+B<On failure> (or if the book wasn't found; or an invalid ISBN was given)
+returns either C<undef> or an empty
+list, depending on the context, and the reason for failure will
+be available via C<< ->error >> method. B<On success> returns a string
+containing book ID.
 
 =head1 REPOSITORY
 

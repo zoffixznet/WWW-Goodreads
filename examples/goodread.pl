@@ -17,9 +17,14 @@ my $gr = WWW::Goodreads->new(
     access_token_secret => 'Er4wCvp6fLIzTXWDz6CiPfTiSyNWnMxxnWnDqBiT1M',
 );
 
-# $gr->auth;
-my $info= $gr->author_show( id => 42 )
+# my $id = $gr->book_isbn_to_id('0679734996')
+#     or die "Error: " . $gr->error;
+
+
+my $isbn = Business::ISBN->new('978-1-400-04231-9');
+my $id = $gr->book_isbn_to_id( $isbn )
     or die "Error: " . $gr->error;
 
+
 use Acme::Dump::And::Dumper;
-die DnD [ $info ];
+die DnD [ $id ];

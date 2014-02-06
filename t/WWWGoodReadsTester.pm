@@ -1,4 +1,5 @@
-package WWWGoodReadsTester;
+package
+    WWWGoodReadsTester;
 
 use strict;
 use warnings;
