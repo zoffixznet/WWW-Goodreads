@@ -18,8 +18,8 @@ my $gr = WWW::Goodreads->new(
 );
 
 # $gr->auth;
-my $books = $gr->author_books( id => 42 )
+my $info= $gr->author_show( id => 42 )
     or die "Error: " . $gr->error;
 
 use Acme::Dump::And::Dumper;
-die DnD [ $books ];
+die DnD [ $info ];

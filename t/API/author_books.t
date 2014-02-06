@@ -51,7 +51,7 @@ cmp_deeply(
            'average_rating' => re('\A[\d.]+\z'),
         }),
     },
-    '->auth_user got the right stuff'
+    '->auth_books got the right stuff'
 );
 
 

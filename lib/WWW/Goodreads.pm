@@ -189,7 +189,37 @@ sub author_books {
     return $data;
 }
 
-sub author_show { ... }
+sub author_show {
+    my ( $self, %args ) = @_;
+    $args{id}
+        or croak 'You MUST specify Goodreads Author id number using the'
+            . ' `id` argument; e.g. ->author_show( id => 42 )';
+
+    my $data = $self->_make_key_request(
+        'https://www.goodreads.com/author/show/' . $args{id} . '.xml',
+    );
+
+    $data = XMLin( $data,
+        GroupTags => { authors => 'author' },
+    );
+
+    # Shuffle the data to where it makes more sense
+    $data = delete $data->{author};
+    $data->{books} = delete $data->{books}{book};
+
+    # This is really sort of a hack to fix what XML::Simple gave us;
+    # Would this be cleaner if we used a different parser?
+    __xml_simple_make_true_undef( $data );
+    __xml_simple_decontentify( @$data{qw/fans_count/} );
+    for my $book ( @{ $data->{books} } ) {
+        __xml_simple_forcearray( $book->{authors} );
+        __xml_simple_decontentify( @$book{qw/text_reviews_count  id/} );
+        __xml_simple_make_true_undef( $book );
+    }
+
+    return $data;
+}
+
 sub book_isbn_to_id { ... }
 sub book_review_counts { ... }
 sub book_show { ... }
@@ -276,9 +306,35 @@ WWW::Goodreads - www.goodreads.com API implementation
 
 =head1 SYNOPSIS
 
+=for html
+
+=head1 ICON LEGEND
+
+=for html This documentation contains icons that allow easy recognition of
+what arguments and returned values are valid with the method. Possible icons
+you might see:
+
+=over 4
+
+=item
+
+=for html <img src="https://github.com/zoffixznet/Pod-Spiffy/raw/master/PODIcons/args-none.png" alt="Takes no arguments"> the method takes no arguments
+
+=item
+
+=for html <img src="https://raw2.github.com/zoffixznet/Pod-Spiffy/e81e2b5ebc103c052191bffe0af363a659b5e406/PODIcons/undef-or-empty-list.png" alt="On failure, returns either undef or an empty list"> on failure, the method returns either <code>undef</code> or an empty list, depending on the context
+
+=item
+
+=for html <img src="https://github.com/zoffixznet/Pod-Spiffy/raw/master/PODIcons/return-hashref.png" alt="On success, returns a hashref"> the method returns a hashref on success
+
+=back
+
 =head1 API METHODS
 
 =head2 C<auth_user>
+
+=for html <img src="https://github.com/zoffixznet/Pod-Spiffy/raw/master/PODIcons/args-none.png" alt="Takes no arguments"> <img src="https://github.com/zoffixznet/Pod-Spiffy/raw/master/PODIcons/return-hashref.png" alt="On success, returns a hashref"> <img src="https://raw2.github.com/zoffixznet/Pod-Spiffy/e81e2b5ebc103c052191bffe0af363a659b5e406/PODIcons/undef-or-empty-list.png" alt="On failure, returns either undef or an empty list">
 
     my $user = $gr->auth_user
         or die "Error: " . $gr->error;
@@ -292,6 +348,7 @@ WWW::Goodreads - www.goodreads.com API implementation
     # User ID: 28080395
     # Link to user's profile: https://www.goodreads.com/user/show/28080395-perl-module?utm_medium=api
 
+I<Get id of user who authorized OAuth.>
 B<Takes> no arguments. Fetches information on the currently authorized
 user. B<On failure> return either C<undef> or an empty
 list, depending on the context, and the reason for failure will
@@ -302,12 +359,15 @@ profile respectively.
 
 =head2 C<author_books>
 
+=for html <img src="https://github.com/zoffixznet/Pod-Spiffy/raw/master/PODIcons/args-none.png" alt="Takes no arguments"> <img src="https://github.com/zoffixznet/Pod-Spiffy/raw/master/PODIcons/return-hashref.png" alt="On success, returns a hashref"> <img src="https://raw2.github.com/zoffixznet/Pod-Spiffy/e81e2b5ebc103c052191bffe0af363a659b5e406/PODIcons/undef-or-empty-list.png" alt="On failure, returns either undef or an empty list">
+
     my $books = $gr->author_books( id => 42 )
         or die "Error: " . $gr->error;
 
     my $books = $gr->author_books( id => 42, page => 2 )
         or die "Error: " . $gr->error;
 
+I<Paginate an author's books.>
 B<Returns> a paginated list of specified author's books.
 B<Takes> arguments C<id> and C<page> as key/value pairs.
 Argument C<id> is B<mandatory>, and specifies the C<Author ID> of the
@@ -343,6 +403,8 @@ of book hashrefs
 
 =back
 
+Sample:
+
     {
         'link' => 'https://www.goodreads.com/author/show/42.Wendy_Wasserstein',
         'book_end' => '24',
@@ -353,16 +415,24 @@ of book hashrefs
         'books' => [
             {
                 'image_url' => 'https://www.goodreads.com/assets/nocover/111x148.png',
-                'publication_day' => undef,
+                'link' => 'https://www.goodreads.com/book/show/19826.Elements_of_Style',
                 'small_image_url' => 'https://www.goodreads.com/assets/nocover/60x80.png',
+                'publication_day' => '3',
+                'publication_month' => '2', # February
+                'publication_year' => '1992',
+                'publisher' => undef,
+                'published' => undef,
+                'description' => undef,
                 'num_pages' => undef,
                 'edition_information' => undef,
                 'isbn13' => '9781400042319',
-                'ratings_count' => '1067',
                 'isbn' => '1400042313',
+                'ratings_count' => '1067',
                 'id' => '19826',
-                'publisher' => undef,
-                'link' => 'https://www.goodreads.com/book/show/19826.Elements_of_Style',
+                'format' => undef,
+                'text_reviews_count' => '161',
+                'title' => 'Elements of Style',
+                'average_rating' => '2.99'
                 'authors' => [
                      {
                        'link' => 'https://www.goodreads.com/author/show/42.Wendy_Wasserstein',
@@ -375,15 +445,73 @@ of book hashrefs
                        'average_rating' => '3.56'
                      }
                 ],
-                'description' => undef,
-                'publication_month' => undef,
-                'published' => undef,
-                'format' => undef,
-                'text_reviews_count' => '161',
-                'publication_year' => undef,
-                'title' => 'Elements of Style',
-                'average_rating' => '2.99'
             }
+        ],
+    }
+
+=head2 C<author_show>
+
+=for html <img src="https://github.com/zoffixznet/Pod-Spiffy/raw/master/PODIcons/args-none.png" alt="Takes no arguments"> <img src="https://github.com/zoffixznet/Pod-Spiffy/raw/master/PODIcons/return-hashref.png" alt="On success, returns a hashref"> <img src="https://raw2.github.com/zoffixznet/Pod-Spiffy/e81e2b5ebc103c052191bffe0af363a659b5e406/PODIcons/undef-or-empty-list.png" alt="On failure, returns either undef or an empty list">
+
+    my $info = $gr->author_show( id => 42 )
+        or die "Error: " . $gr->error;
+
+I<Get info about an author by id.>
+B<Takes> arguments as key/value pairs. Argument C<id> is B<mandatory>
+and specifies GoodReads Author ID number, for the author whose information
+you want to view. B<On failure> return either C<undef> or an empty
+list, depending on the context, and the reason for failure will
+be available via C<< ->error >> method. B<On success> returns
+a hashref, a sample of which is shown below.
+
+    {
+        'link' => 'https://www.goodreads.com/author/show/42.Wendy_Wasserstein',
+        'name' => 'Wendy Wasserstein',
+        'small_image_url' => 'https://d202m5krfqbpi5.cloudfront.net/authors/1207026232p2/42.jpg',
+        'influences' => undef,
+        'works_count' => '24',
+        'fans_count' => '15',
+        'hometown' => 'Brooklyn, New York',
+        'died_at' => '2006/01/30',
+        'image_url' => 'https://d202m5krfqbpi5.cloudfront.net/authors/1207026232p5/42.jpg',
+        'about' => 'Wendy Wasserstein was an award-winning',
+        'id' => '42',
+        'born_at' => '1950/10/18',
+        'gender' => 'female',
+        'books' => [
+             {
+               'publication_day' => undef,
+               'small_image_url' => 'https://d202m5krfqbpi5.cloudfront.net/books/1329241203s/86.jpg',
+               'num_pages' => '249',
+               'edition_information' => undef,
+               'isbn13' => '9780679734994',
+               'ratings_count' => '1455',
+               'isbn' => '0679734996',
+               'id' => '86',
+               'publisher' => 'Vintage',
+               'link' => 'https://www.goodreads.com/book/show/86.The_Heidi_Chronicles_and_Other_Plays',
+               'authors' => [
+                    {
+                          'link' => 'https://www.goodreads.com/author/show/42.Wendy_Wasserstein',
+                          'name' => 'Wendy Wasserstein',
+                          'small_image_url' => 'https://d202m5krfqbpi5.cloudfront.net/authors/1207026232p2/42.jpg',
+                          'text_reviews_count' => '469',
+                          'ratings_count' => '4560',
+                          'image_url' => 'https://d202m5krfqbpi5.cloudfront.net/authors/1207026232p5/42.jpg',
+                          'id' => '42',
+                          'average_rating' => '3.56'
+                    }
+                ],
+               'description' => undef,
+               'publication_month' => '6',
+               'published' => '1991',
+               'format' => 'Paperback',
+               'text_reviews_count' => '45',
+               'publication_year' => '1991',
+               'image_url' => 'https://d202m5krfqbpi5.cloudfront.net/books/1329241203m/86.jpg',
+               'title' => 'The Heidi Chronicles and Other Plays',
+               'average_rating' => '3.82'
+             },
         ],
     }
 
