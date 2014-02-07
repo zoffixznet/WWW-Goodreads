@@ -10,8 +10,10 @@ use LWP::UserAgent;
 use Net::OAuth::Simple;
 use URI;
 use Carp qw/croak/;
+use JSON::MaybeXS qw/decode_json/;
 use Business::ISBN;
 use XML::Simple; # wat?
+use namespace::autoclean -also => qr/^__/;
 
 our $AUTHORIZATION_URL = 'https://www.goodreads.com/oauth/authorize';
 our $ACCESS_TOKEN_URL  = 'https://www.goodreads.com/oauth/access_token';
@@ -146,6 +148,16 @@ sub __xml_simple_forcearray {
         for @_;
 }
 
+sub _isbn_from_arg {
+    my $self = shift;
+    my $isbn = shift;
+    $isbn or croak 'You MUST specify a book ISBN as the argument';
+
+    $isbn = Business::ISBN->new( $isbn )
+        unless ref $isbn;
+
+    return $isbn;
+}
 
 #### API METHODS
 
@@ -221,19 +233,59 @@ sub author_show {
 }
 
 sub book_isbn_to_id {
-    my ( $self, $isbn ) = @_;
-
-    $isbn or croak 'You MUST specify a book ISBN number as the argument';
-
-    $isbn = Business::ISBN->new( $isbn )
-        unless ref $isbn;
-
+    my $self = shift;
+    my $isbn = $self->_isbn_from_arg( shift );
     return $self->_make_key_request(
         'https://www.goodreads.com/book/isbn_to_id/' . $isbn->as_string([])
     );
 }
 
-sub book_review_counts { ... }
+sub book_review_counts {
+    my $self = shift;
+    my $isbns = shift;
+    $isbns = [ $isbns ] unless ref $isbns eq 'ARRAY';
+    my $callback = shift;
+
+    ### ISBN processing and checking
+    @$isbns = map $self->_isbn_from_arg( $_ ), @$isbns;
+    for ( 0 .. $#$isbns ) {
+        next if defined $isbns->[$_] and length $isbns->[$_]->as_string([]);
+        croak 'The ISBN you provided is invalid or you gave me an undef'
+            if $_ == 0;
+
+        croak 'The ISBN number at position ' . ($_+1)
+            . ' is invalid or is an undef';
+    }
+
+    @$isbns or croak 'You must provide at least one valid ISBN'
+        . 'number or compatible object';
+
+    my $json = $self->_make_key_request(
+        'https://www.goodreads.com/book/review_counts.json',
+        'GET',
+        isbns   => join(',', map $_->as_string([]), @$isbns),
+        format  => 'json',
+        defined $callback ? ( callback => $callback ) : (),
+    );
+
+    unless ( $json ) {
+        $self->error =~ /Network.+404/
+            and $self->error('not found');
+        return;
+    }
+
+    return $json
+        if defined $callback;
+    $json = decode_json $json;
+
+    if ( @$isbns > 1 ) {
+        return wantarray ? @{ $json->{books} } : $json->{books};
+    }
+    else {
+        $json->{books}[0];
+    }
+}
+
 sub book_show { ... }
 sub book_show_by_isbn { ... }
 sub book_title { ... }
@@ -518,6 +570,105 @@ returns either C<undef> or an empty
 list, depending on the context, and the reason for failure will
 be available via C<< ->error >> method. B<On success> returns a string
 containing book ID.
+
+=head2 C<book_review_counts>
+
+    my $isbn = Business::ISBN->new('978-1-400-04231-9');
+    my $revs = $gr->book_review_counts( [ $isbn, '0345348125',] )
+        or die "Error: " . $gr->error;
+
+    my $json = $gr->book_review_counts( [ $isbn, '0345348125',], 'callback' )
+        or die "Error: " . $gr->error;
+
+    my @revs = $gr->book_review_counts( [ $isbn, '0345348125',] )
+        or die "Error: " . $gr->error;
+
+    my $rev = $gr->book_review_counts( $isbn )
+        or die "Error: " . $gr->error;
+
+    my $json = $gr->book_review_counts( $isbn, 'callback' )
+        or die "Error: " . $gr->error;
+
+    my $rev = $gr->book_review_counts( $isbn );
+    unless ( $rev ) {
+        if ( $gr->error eq 'not found' ) {
+            print "Book was not found!\n";
+        }
+        else {
+            die "Error: " . $gr->error;
+        }
+    }
+
+I<Get review statistics for books given a list of ISBNs.>
+You must give at least one ISBN number too look up in the arguments,
+which can be either a string, or an object like L<Business::ISBN>.
+Possible arguments and their forms are as follows:
+
+=over 4
+
+=item * B<One argument, a string:> Must be an ISBN number
+
+=item * B<Two arguments, both strings:> The first one must be an ISBN
+number; the second one is the string with the "function to wrap JSON
+response"
+
+=item * B<One argument, an arrayref:>
+Each element of the arrayref must be an ISBN number, and the arrayref
+must have at least one of them. If any element is C<undef> or an
+invalid ISBN number, the module will C<croak()>
+
+=item * B<Two arguments, first one an arrayref, second a string:>
+The arrayref must contain ISBN numbers (as detailed above) and the
+second argument is the string with the "function to wrap JSON response"
+
+=back
+
+The return values depend on the result of the request, the input arguments,
+and the context:
+
+=over 4
+
+=item * B<If an error occurs:>
+Returns either C<undef> or an empty list, depending on the context,
+and the reason for failure will be available via C<< ->error >> method.
+
+=item * B<If no books were found:>
+Will return the same as if an error occured, and the error message
+will be C<not found> (lowercase).
+
+=item * B<If callback string was given:>
+Will return JSON string wrapped in the provided callback.
+
+=item * B<No callback string, list context:>
+Will return a list of hashrefs, each representing a found review
+statistic for the book
+
+=item * B<No callback string, scalar context, only one ISBN was given
+in the arguments:>
+Will return a hashrefs representing the found review
+statistic for the book.
+
+=item * B<No callback string, scalar context, several ISBN were given
+in the arguments:>
+Will return an arrayref of hashrefs, each representing a found review
+statistic for a book.
+
+=back
+
+Each book review statistic hashref has the following format:
+
+    {
+        'work_text_reviews_count' => 47,
+        'work_ratings_count' => 1458,
+        'work_reviews_count' => 1970,
+        'text_reviews_count' => 45,
+        'isbn13' => '9780679734994',
+        'reviews_count' => 1955,
+        'ratings_count' => 1449,
+        'isbn' => '0679734996',
+        'id' => 86,
+        'average_rating' => '3.82'
+    }
 
 =head1 REPOSITORY
 

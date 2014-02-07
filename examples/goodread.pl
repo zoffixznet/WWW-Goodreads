@@ -17,14 +17,25 @@ my $gr = WWW::Goodreads->new(
     access_token_secret => 'Er4wCvp6fLIzTXWDz6CiPfTiSyNWnMxxnWnDqBiT1M',
 );
 
+my $isbn = Business::ISBN->new('978-1-400-04231-9');
+my $isbn2 = '0679734996';
+# my $isbn3 = '0345348125';
+
+    my $book = $gr->book_review_counts( '978-1-105-87246-4' );
+
+use Acme::Dump::And::Dumper;
+die DnD [ $book, $gr->error ];
+
+
+__END__
 # my $id = $gr->book_isbn_to_id('0679734996')
 #     or die "Error: " . $gr->error;
 
 
 my $isbn = Business::ISBN->new('978-1-400-04231-9');
-my $id = $gr->book_isbn_to_id( $isbn )
+my $json = $gr->book_review_counts( [ $isbn, '0345348125',] )
     or die "Error: " . $gr->error;
 
 
 use Acme::Dump::And::Dumper;
-die DnD [ $id ];
+die DnD [ $json ];
