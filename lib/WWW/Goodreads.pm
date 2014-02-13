@@ -286,8 +286,54 @@ sub book_review_counts {
     }
 }
 
-sub book_show { ... }
-sub book_show_by_isbn { ... }
+sub book_show {
+    my ( $self, $book_id, %args ) = @_;
+    $book_id or croak 'You must specify GoodReads book ID';
+
+    %args = (
+        format      => 'json',
+        text_only   => 0,
+        %args,
+    );
+
+    my $data = $self->_make_key_request(
+        'https://www.goodreads.com/book/show/' . $book_id,
+        'GET',
+        %args,
+    ) or return;
+
+    if ( $data =~ /^<!DOCTYPE html>/ ) {
+        $self->error('not found');
+        return;
+    }
+
+    return $data;
+}
+
+sub book_show_by_isbn {
+    my ( $self, $book_isbn, %args ) = @_;
+    $book_isbn = $self->_isbn_from_arg( $book_isbn );
+    $book_isbn or croak 'You must specify a valid ISBN number';
+
+    %args = (
+        format      => 'json',
+        text_only   => 0,
+        %args,
+    );
+
+    my $data = $self->_make_key_request(
+        'https://www.goodreads.com/book/show/' . $book_id,
+        'GET',
+        %args,
+    ) or return;
+
+    if ( $data =~ /^<!DOCTYPE html>/ ) {
+        $self->error('not found');
+        return;
+    }
+
+    return $data;
+}
 sub book_title { ... }
 sub comment_create { ... }
 sub comment_list { ... }
@@ -373,6 +419,8 @@ WWW::Goodreads - www.goodreads.com API implementation
 =head1 API METHODS
 
 =head2 C<auth_user>
+
+=for pod_spiffy in no args | out error undef list
 
     my $user = $gr->auth_user
         or die "Error: " . $gr->error;
@@ -669,6 +717,74 @@ Each book review statistic hashref has the following format:
         'id' => 86,
         'average_rating' => '3.82'
     }
+
+=head2 C<book_show>
+
+    my $data = $gr->book_show( 42, format => 'xml', text_only => 1, rating => 4 )
+        or die 'Error: ' . $gr->error;
+
+    my $data = $gr->book_show( 99999999999, format => 'xml', text_only => 1 );
+    unless ( $data ) {
+        if ( $error eq 'not found' ) {
+            print "Book not found!";
+        }
+        else {
+            die 'Error: ' . $gr->error;
+        }
+    }
+
+I<Get an XML or JSON file that contains embed code for the iframe
+reviews widget. The reviews widget shows an excerpt (first 300 characters)
+of the most popular reviews of a book for a given internal Goodreads
+book_id. Reviews of all known editions of the book are included.
+
+XML responses also include shelves and book meta-data (title, author,
+et cetera). The Goodreads API gives you full access to Goodreads-owned
+meta-data, but it does not give you full access to book meta-data
+supplied by third parties such as Ingram. Book cover images,
+descriptions, and other data from third party sources might be
+excluded, because we do not have a license to distribute these
+data via our API.>
+
+B<On failure> (or if the book wasn't found; or a network error occured)
+returns either C<undef> or an empty
+list, depending on the context, and the reason for failure will
+be available via C<< ->error >> method. For book-not-found errors,
+the error will be set to C<not found> (lowercase).
+B<On success> returns a string containing data that depends on the
+argument you specified (default is a JSON string).
+
+B<Takes> one mandatory and several optional arguments.
+The mandatory argument is given as is, and has to be the GoodReads
+ID of the book you're looking up; the rest of the arguments
+are given as key/value pairs. Possible arguments are as follows:
+
+=head3 C<format>
+
+    my $data = $gr->book_show( 42, format => 'xml' )
+        or die 'Error: ' . $gr->error;
+
+B<Optional.> Specifies the format of the output. Possible values
+are C<json> or C<xml> (lowercase) that correspond to JSON or XML
+format for the output. B<Defaults to:> C<json>
+
+=head3 C<text_only>
+
+    my $data = $gr->book_show( 42, text_only => 1, )
+        or die 'Error: ' . $gr->error;
+
+B<Optional.> As per
+L<GoodReads API docs|https://www.goodreads.com/api#book.show>:
+I<Only show reviews that have text>. B<Takes> true or false values.
+B<Defaults to:> C<0> (false).
+
+=head3 C<rating>
+
+    my $data = $gr->book_show( 42, rating => 2.99, )
+        or die 'Error: ' . $gr->error;
+
+I<Show only reviews with a particular rating (optional)>. Takes
+a numeric representation of rating as a value.
 
 =head1 REPOSITORY
 

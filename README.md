@@ -1,3 +1,19 @@
+# UMMM
+
+This is gotta be the most inconsistent API I've ever tried to implement. It's annoying. It's huge. It's amazingly inconsistent. Is there a point in implementing it?
+
+Annoyed. If anyone direly needs this API in Perl, let me know; otherwise, I'm putting this on a backburner.
+
+
+
+
+
+
+
+
+
+
+
 # NAME
 
 WWW::Goodreads - www.goodreads.com API implementation
